@@ -93,6 +93,25 @@ func (f *fakeTPM) EKIdentityAuth(auth []byte) ([]byte, error) {
 	return append([]byte{0, 0x0B}, bytes.Repeat([]byte{0x5a}, 32)...), nil
 }
 
+// A Name of the right length with the wrong algorithm prefix, and a Name of
+// the right prefix and the wrong length, are each refused on their own: the
+// two halves of the check are each asserted, none left to a crash.
+func TestIdentityNameShape(t *testing.T) {
+	f := newFake()
+	use(t, f)
+	c := &Counter{opts: Options{Device: "unix:x"}}
+	for name, n := range map[string][]byte{
+		"right length, wrong alg":  append([]byte{0, 0x04}, make([]byte, 32)...),
+		"right prefix, one longer": append([]byte{0, 0x0B}, make([]byte, 33)...),
+	} {
+		f.ekName = n
+		id, err := c.Identity()
+		if !errors.Is(err, ErrIdentity) || id != nil {
+			t.Errorf("%s: %x %v", name, id, err)
+		}
+	}
+}
+
 func TestIdentity(t *testing.T) {
 	f := newFake()
 	use(t, f)
