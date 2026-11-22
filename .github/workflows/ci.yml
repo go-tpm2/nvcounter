@@ -1,0 +1,83 @@
+# go-tpm2/nvcounter CI: vet, gofmt, a software TPM (swtpm) run end to end,
+# and the 100% statement-coverage gate. The module is not part of a workspace,
+# so every Go invocation runs with GOWORK=off.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GOWORK: off
+  CGO_ENABLED: 0
+
+jobs:
+  test:
+    name: test (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runs-on: ubuntu-latest
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needs to be run on:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - run: go vet ./...
+
+      # A missing swtpm is a failure here, not a skip.
+      - name: Install swtpm
+        run: sudo apt-get update && sudo apt-get install -y swtpm
+
+      - name: test + coverage gate (100%)
+        env:
+          NVCOUNTER_REQUIRE_SWTPM: '1'
+        run: |
+          go test -coverprofile=cover.out ./...
+          pct=$(go tool cover -func=cover.out | tail -n 1 | awk '{print $3}' | tr -d '%')
+          echo "total coverage: ${pct}%"
+          awk -v p="$pct" 'BEGIN { exit !(p+0 >= 100.0) }' || {
+            echo "::error::coverage ${pct}% < 100.0%"; exit 1; }
+
+  # The package picks Windows TBS by default: vet for every Windows arch, then
+  # the tests (swtpm tests skip there; the fake-TPM tests run).
+  windows:
+    name: windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: vet (windows amd64, arm64, 386)
+        run: |
+          GOARCH=amd64 go vet ./...
+          GOARCH=arm64 go vet ./...
+          GOARCH=386 go vet ./...
+      - run: go test ./...
