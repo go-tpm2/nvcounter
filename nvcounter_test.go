@@ -117,9 +117,19 @@ func TestIdentity(t *testing.T) {
 	}
 	f.ekName = nil
 	f.fail["ek"] = boom
-	if _, err := c.Identity(); !errors.Is(err, ErrIdentity) {
+	// The refusal carries the TPM's own error, not a complaint about a Name that
+	// was never returned.
+	if _, err := c.Identity(); !errors.Is(err, ErrIdentity) || !strings.Contains(err.Error(), "boom") ||
+		strings.Contains(err.Error(), "bytes") {
 		t.Fatalf("EK failure: %v", err)
 	}
+	f.ekName = []byte{0, 0x0B, 1}
+	delete(f.fail, "ek")
+	if _, err := c.Identity(); !errors.Is(err, ErrIdentity) || !strings.Contains(err.Error(), "3 bytes") {
+		t.Fatalf("short Name: %v", err)
+	}
+	f.ekName = nil
+	f.fail["ek"] = boom
 	delete(f.fail, "ek")
 	f.fail["connect"] = boom
 	if _, err := c.Identity(); !errors.Is(err, boom) {
